@@ -6,6 +6,7 @@ import (
 	"github.com/mitchellh/packer/packer"
 	"strings"
 	"testing"
+	"fmt"
 )
 
 func testConfig() map[string]interface{} {
@@ -50,9 +51,12 @@ func TestPostProcessorPrepare_compressionLevel(t *testing.T) {
 	// Set
 	c = testConfig()
 	c["compression_level"] = 7
+	fmt.Println ("Call configure --> ")
 	if err := p.Configure(c); err != nil {
 		t.Fatalf("err: %s", err)
 	}
+	fmt.Println("Cmp Level %#v", config.CompressionLevel)
+
 
 	config = p.configs[""]
 	if config.CompressionLevel != 7 {
