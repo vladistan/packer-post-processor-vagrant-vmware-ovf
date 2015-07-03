@@ -10,7 +10,10 @@ import (
 
 	"github.com/mitchellh/packer/common"
 	"github.com/mitchellh/packer/packer"
+    "github.com/mitchellh/packer/template/interpolate"
 )
+
+import cfg "github.com/mitchellh/packer/helper/config"
 
 var builtins = map[string]string{
 	"mitchellh.vmware": "vmware",
@@ -26,7 +29,7 @@ type Config struct {
 	VagrantfileTemplate string `mapstructure:"vagrantfile_template"`
 	Provider            string `mapstructure:"provider"`
 
-	tpl *packer.ConfigTemplate
+	ctx interpolate.Context
 }
 
 type PostProcessor struct {
@@ -88,11 +91,14 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 
 	ui.Say(fmt.Sprintf("Creating Vagrant box for '%s' provider", name))
 
-	outputPath, err := config.tpl.Process(config.OutputPath, &outputPathTemplate{
+    ctx := config.ctx
+    ctx.Data = &outputPathTemplate{
 		ArtifactId: artifact.Id(),
 		BuildName:  config.PackerBuildName,
 		Provider:   name,
-	})
+	}
+    
+	outputPath, err := interpolate.Render(config.OutputPath, &ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -162,49 +168,28 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 }
 
 func (p *PostProcessor) configureSingle(config *Config, raws ...interface{}) error {
-	md, err := common.DecodeConfig(config, raws...)
+	err := cfg.Decode(config,
+        &cfg.DecodeOpts{
+        		Interpolate:        true,
+        		InterpolateContext: &config.ctx,
+        	},        
+        raws...)
 	if err != nil {
 		return err
 	}
 
-	config.tpl, err = packer.NewConfigTemplate()
-	if err != nil {
-		return err
-	}
-	config.tpl.UserVars = config.PackerUserVars
 
 	// Defaults
 	if config.OutputPath == "" {
 		config.OutputPath = "packer_{{ .BuildName }}_{{.Provider}}.box"
 	}
 
-	found := false
-	for _, k := range md.Keys {
-		if k == "compression_level" {
-			found = true
-			break
-		}
-	}
 
-	if !found {
+	if config.CompressionLevel == 0 {
 		config.CompressionLevel = flate.DefaultCompression
 	}
 
-	// Accumulate any errors
-	errs := common.CheckUnusedConfig(md)
-
-	validates := map[string]*string{
-		"output":               &config.OutputPath,
-		"vagrantfile_template": &config.VagrantfileTemplate,
-		"provider":             &config.Provider,
-	}
-
-	for n, ptr := range validates {
-		if err := config.tpl.Validate(*ptr); err != nil {
-			errs = packer.MultiErrorAppend(
-				errs, fmt.Errorf("Error parsing %s: %s", n, err))
-		}
-	}
+	var errs *packer.MultiError
 
 	if errs != nil && len(errs.Errors) > 0 {
 		return errs
